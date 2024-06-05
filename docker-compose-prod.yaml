@@ -1,0 +1,27 @@
+version: "3.5"
+
+services:
+  mongodb:
+    image: mongo:4.4.4
+    restart: always
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_ROOT_USERNAME}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_ROOT_PASSWORD}
+      - MONGO_INITDB_DATABASE=root
+    volumes:
+      - ~/mongodb/data:/data/db
+
+  topology-manager:
+    image: brunobevilaquaa/fed-topology-manager
+    container_name: topology-manager
+    ports:
+      - "8080:8080"
+    environment:
+      - MONGO_URL=${MONGO_URL}
+      - TOP_MAX_REDUNDANCY=${TOP_MAX_REDUNDANCY}
+      - CORE_ANN_INTERVAL=${CORE_ANN_INTERVAL}
+      - BEACON_INTERVAL=${BEACON_INTERVAL}
+      - FED_REDUNDANCY=${FED_REDUNDANCY}
