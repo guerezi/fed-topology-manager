@@ -2,7 +2,6 @@ package mqttbmlatency
 
 import (
 	"fmt"
-	"log"
 	"strconv"
 	"time"
 
@@ -22,6 +21,15 @@ type SubClient struct {
 	Quiet      bool
 }
 
+// run is a method of the SubClient struct that starts the subscriber client and handles the subscription process.
+// It receives three channels: res, subDone, and jobDone. <\br>
+// [res] is a channel used to send the results of the subscription process.
+// [subDone] is a channel used to signal the completion of the subscription process.
+// [jobDone] is a channel used to signal the completion of the job.
+// The function connects to the MQTT broker, subscribes to the specified topic, and listens for incoming messages.
+// It calculates the forward latency for each received message and stores the results in the runResults struct.
+// Once the jobDone channel receives a signal, the function disconnects from the broker, calculates the statistics for the forward latency,
+// sends the runResults to the res channel, and returns.
 func (c *SubClient) run(res chan *SubResults, subDone chan string, jobDone chan bool) {
 	runResults := new(SubResults)
 	runResults.ID = c.ID
@@ -41,6 +49,7 @@ func (c *SubClient) run(res chan *SubResults, subDone chan string, jobDone chan 
 			payload := msg.Payload()
 			i := 0
 			for ; i < len(payload)-3; i++ {
+				// Find the sent time in the payload by looking for the pattern "#@#"
 				if payload[i] == '#' && payload[i+1] == '@' && payload[i+2] == '#' {
 					sendTime, _ := strconv.ParseInt(string(payload[:i]), 10, 64)
 					forwardLatency = append(forwardLatency, float64(recvTime-sendTime)/1000000) // in milliseconds
@@ -50,8 +59,9 @@ func (c *SubClient) run(res chan *SubResults, subDone chan string, jobDone chan 
 			runResults.Received++
 		}).
 		SetConnectionLostHandler(func(client mqtt.Client, reason error) {
-			log.Printf("SUBSCRIBER %v lost connection to the broker: %v. Will reconnect...\n", c.ID, reason.Error())
+			fmt.Println("SUBSCRIBER ", c.ID, " lost connection to the broker: ", reason.Error(), ". Will reconnect...")
 		})
+
 	if c.BrokerUser != "" && c.BrokerPass != "" {
 		opts.SetUsername(c.BrokerUser)
 		opts.SetPassword(c.BrokerPass)
@@ -59,19 +69,19 @@ func (c *SubClient) run(res chan *SubResults, subDone chan string, jobDone chan 
 	client := mqtt.NewClient(opts)
 
 	if token := client.Connect(); token.Wait() && token.Error() != nil {
-		log.Printf("SUBSCRIBER %v had error connecting to the broker: %v\n", c.ID, token.Error())
+		fmt.Println("SUBSCRIBER ", c.ID, " had error connecting to the broker: ", token.Error())
 		subDone <- "error"
 		return
 	}
 
 	if token := client.Subscribe(c.SubTopic, c.SubQoS, nil); token.Wait() && token.Error() != nil {
-		log.Printf("SUBSCRIBER %v had error subscribe with topic: %v\n", c.ID, token.Error())
+		fmt.Println("SUBSCRIBER ", c.ID, " had error subscribe with topic: ", token.Error())
 		subDone <- "error"
 		return
 	}
 
 	if !c.Quiet {
-		log.Printf("SUBSCRIBER %v had connected to the broker: %v and subscribed with topic: %v\n", c.ID, c.BrokerURL, c.SubTopic)
+		fmt.Println("SUBSCRIBER ", c.ID, " had connected to the broker: ", c.BrokerURL, " and subscribed with topic: ", c.SubTopic)
 	}
 
 	subDone <- "success"
@@ -87,7 +97,7 @@ func (c *SubClient) run(res chan *SubResults, subDone chan string, jobDone chan 
 			runResults.FwdLatencyStd = stats.StatsSampleStandardDeviation(forwardLatency)
 			res <- runResults
 			if !c.Quiet {
-				log.Printf("SUBSCRIBER %v is done subscribe\n", c.ID)
+				fmt.Println("SUBSCRIBER ", c.ID, " is done subscribe")
 			}
 			return
 		}

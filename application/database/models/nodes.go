@@ -17,6 +17,7 @@ import (
 // The [NeighborsAmount] is the amount of neighbors the node has
 // The [Latency] is the latency of the node
 // The [LatestHealthCheck] is the time of the last health check of the node
+// The [PublicKey] is the public key of the node
 type Node struct {
 	ObjectId          primitive.ObjectID     `bson:"_id,omitempty" json:"_id"`
 	Id                int64                  `bson:"id" json:"id"`
@@ -25,4 +26,5 @@ type Node struct {
 	NeighborsAmount   int                    `bson:"neighborsAmount" json:"neighborsAmount"`
 	Latency           float64                `bson:"latency" json:"latency"`
 	LatestHealthCheck time.Time              `bson:"latestHealthCheck" json:"latestHealthCheck"`
+	PublicKey         string                 `bson:"publicKey" json:"publicKey"`
 }

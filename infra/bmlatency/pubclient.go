@@ -3,7 +3,6 @@ package mqttbmlatency
 import (
 	"bytes"
 	"fmt"
-	"log"
 	"strconv"
 	"time"
 
@@ -49,10 +48,10 @@ func (c *PubClient) run(res chan *PubResults) {
 		select {
 		case m := <-pubMsgs:
 			if m.Error {
-				log.Printf("PUBLISHER %v ERROR publishing message: %v: at %v\n", c.ID, m.Topic, m.Sent.Unix())
+				fmt.Println("PUBLISHER ", c.ID, " ERROR publishing message: ", m.Topic, " at ", m.Sent.Unix())
 				runResults.Failures++
 			} else {
-				// log.Printf("Message published: %v: sent: %v delivered: %v flight time: %v\n", m.Topic, m.Sent, m.Delivered, m.Delivered.Sub(m.Sent))
+				fmt.Println("Message Sent by: ", c.ID, " on Topic:", m.Topic, " at: ", m.Sent)
 				runResults.Successes++
 				times = append(times, m.Delivered.Sub(m.Sent).Seconds()*1000) // in milliseconds
 			}
@@ -73,9 +72,11 @@ func (c *PubClient) run(res chan *PubResults) {
 	}
 }
 
-// genMessages is a method of the PubClient struct that generates messages and sends them to the `ch` channel.
-// It generates `c.MsgCount` messages and sends them to the channel.
-// It sends a signal to the `done` channel when it is done generating messages.
+// genMessages is a method of the PubClient struct that generates messages to be published.
+// It takes an input channel for messages and a channel to signal when message generation is done.
+// The function generates the specified number of messages with the specified size and sends them to the input channel.
+// After generating all messages, it sends a signal that message generation is done and returns.
+// TODO: WHY GENERATE MESSAGES??
 func (c *PubClient) genMessages(ch chan *Message, done chan bool) {
 	for i := 0; i < c.MsgCount; i++ {
 		ch <- &Message{
@@ -85,7 +86,9 @@ func (c *PubClient) genMessages(ch chan *Message, done chan bool) {
 		}
 	}
 	done <- true
-	log.Printf("PUBLISHER %v is done generating messages\n", c.ID)
+	if !c.Quiet {
+		fmt.Println("PUBLISHER ", c.ID, " is done generating messages")
+	}
 }
 
 // pubMessages is a method of the PubClient struct that handles publishing messages to the MQTT broker.
@@ -107,9 +110,10 @@ func (c *PubClient) pubMessages(in, out chan *Message, doneGen, donePub chan boo
 				token := client.Publish(m.Topic, m.QoS, false, m.Payload)
 				token.Wait()
 				if token.Error() != nil {
-					log.Printf("PUBLISHER %v Error sending message: %v\n", c.ID, token.Error())
+					fmt.Println("PUBLISHER ", c.ID, " Error sending message: ", token.Error())
 					m.Error = true
 				} else {
+					fmt.Println("PUBLISHER ", c.ID, " on Topic:", m.Topic, " at: ", m.Sent)
 					m.Delivered = time.Now()
 					m.Error = false
 				}
@@ -117,7 +121,7 @@ func (c *PubClient) pubMessages(in, out chan *Message, doneGen, donePub chan boo
 				ctr++
 			case <-doneGen:
 				if !c.Quiet {
-					log.Printf("PUBLISHER %v had connected to the broker %v and done publishing for topic: %v\n", c.ID, c.BrokerURL, c.PubTopic)
+					fmt.Println("PUBLISHER ", c.ID, " had connected to the broker ", c.BrokerURL, " and done publishing for topic: ", c.PubTopic)
 				}
 				donePub <- true
 				client.Disconnect(250)
@@ -136,7 +140,7 @@ func (c *PubClient) pubMessages(in, out chan *Message, doneGen, donePub chan boo
 		SetOnConnectHandler(onConnected).
 		SetKeepAlive(ka).
 		SetConnectionLostHandler(func(client mqtt.Client, reason error) {
-			log.Printf("PUBLISHER %v lost connection to the broker: %v. Will reconnect...\n", c.ID, reason.Error())
+			fmt.Println("PUBLISHER ", c.ID, " lost connection to the broker: ", reason.Error(), ". Will reconnect...")
 		})
 	if c.BrokerUser != "" && c.BrokerPass != "" {
 		opts.SetUsername(c.BrokerUser)
@@ -147,6 +151,6 @@ func (c *PubClient) pubMessages(in, out chan *Message, doneGen, donePub chan boo
 	token.Wait()
 
 	if token.Error() != nil {
-		log.Printf("PUBLISHER %v had error connecting to the broker: %v\n", c.ID, token.Error())
+		fmt.Println("PUBLISHER ", c.ID, " had error connecting to the broker: ", token.Error())
 	}
 }

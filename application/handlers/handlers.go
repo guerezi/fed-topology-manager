@@ -2,7 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
-	"log"
+	"fmt"
 	"net/http"
 	"topology/application/services"
 	"topology/application/utils"
@@ -12,6 +12,8 @@ import (
 // This function is a handler that receives a POST request to join a node to the network
 // It returns a JSON response with the federator configuration
 func JoinHandler(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("Request on JoinHandler: ", r)
+
 	// Create a new NodeService
 	nodeService := services.NewNodeService()
 
@@ -40,7 +42,9 @@ func JoinHandler(w http.ResponseWriter, r *http.Request) {
 	// Write the response to the response writer
 	_, err = w.Write(payload)
 
+	fmt.Println("Response on JoinHandler: ", string(payload))
+
 	if err != nil {
-		log.Println("Error on write response")
+		fmt.Println("Error on write response")
 	}
 }

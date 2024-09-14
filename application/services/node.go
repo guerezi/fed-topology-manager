@@ -52,6 +52,7 @@ func (n *NodeService) getNodeId() int64 {
 	var lastInsertedNode models.Node
 	err := n.Collection.FindOne(context.Background(), filter, opts).Decode(&lastInsertedNode)
 
+	fmt.Println("Last inserted node: ", lastInsertedNode, err)
 	if err != nil {
 		return 0
 	}
@@ -66,7 +67,7 @@ func (n *NodeService) getNodeLatency(broker string) (float64, error) {
 	// The parameters are the broker address, the topic to publish the benchmark message,
 	// the number of messages to send, the message size, the QoS, the number of publishers,
 	// the number of subscribers, and if the benchmark is bidirectional.
-	bm, err := mqttbmlatency.Start(broker, "federator/topology_bm", 1, 64, 1, 1, true)
+	bm, err := mqttbmlatency.Start(broker, "federator/topology_bm", 1, 64, 1, 1, true) // ,false) MORE LOGS
 
 	if err != nil {
 		return 10000, err
@@ -116,6 +117,8 @@ func (n *NodeService) getNeighborsForNode(id int64) []models.Node {
 		neighbors = append(neighbors, neighborRedundancy)
 	}
 
+	fmt.Println("Database neighbors for node", id, ":", neighbors)
+
 	return neighbors
 }
 
@@ -125,10 +128,10 @@ func (n *NodeService) getNeighborsForNode(id int64) []models.Node {
 // [neighbors]: A slice of models.Node representing the existing neighbors.
 // [newNode]: A pointer to models.Node representing the new node to be added.
 func (n *NodeService) updateNeighbors(neighbors []models.Node, newNode *models.Node) {
-	fmt.Print("Updating neighbors for node", newNode.Id)
+	fmt.Println("Updating neighbors for node ", newNode.Id)
 	for _, neighbor := range neighbors {
 		//update new node neighbors
-		newNode.Neighbors = append(newNode.Neighbors, utils.NeighborConfig{Id: neighbor.Id, Ip: neighbor.Ip})
+		newNode.Neighbors = append(newNode.Neighbors, utils.NeighborConfig{Id: neighbor.Id, Ip: neighbor.Ip, PublicKey: neighbor.PublicKey})
 		newNode.NeighborsAmount += 1
 
 		//adds the new node to neighbor already belonging to the topology
@@ -145,22 +148,24 @@ func (n *NodeService) updateNeighbors(neighbors []models.Node, newNode *models.N
 		// Update the neighbor with the new node information
 		_, _ = n.Collection.UpdateOne(context.Background(), filter, update)
 
-		//send topology ann to neighbor informing the addition of a new node
+		// Create a new MQTT client (that will die) to send the topology announcement to the neighbor
 		mqttClient, err := paho.NewClient(neighbor.Ip, "microservice")
 
 		// If the connection to the neighbor was successful, send the topology announcement
 		if err == nil {
-			fmt.Println("Sending topology announcement to neighbor NEW CALL", neighbor.Id)
+			fmt.Println("Sending topology announcement from ", newNode.Id, "to neighbor NEW CALL", neighbor.Id)
+			//TODO: HERE
 			payload, _ := json.Marshal(utils.TopologyAnn{
-				Action:   "NEW",
-				Neighbor: utils.NeighborConfig{Id: newNode.Id, Ip: newNode.Ip},
+				Action:    "NEW",
+				Neighbor:  utils.NeighborConfig{Id: newNode.Id, Ip: newNode.Ip},
+				PublicKey: newNode.PublicKey,
 			})
 
 			_, _ = mqttClient.Publish("federator/topology_ann", payload, 2, false)
 
 			mqttClient.Disconnect()
 		} else {
-			fmt.Println("Error connecting to neighbor", neighbor.Id)
+			fmt.Println("Error connecting to neighbor", neighbor.Ip)
 		}
 	}
 }
@@ -186,6 +191,8 @@ func (n *NodeService) NewNode(data io.ReadCloser) (*utils.FederatorConfig, error
 	// Get the latency of the new node by sending a benchmark message to the broker
 	newNode.Latency, _ = n.getNodeLatency(newNode.Ip)
 	newNode.LatestHealthCheck = time.Now()
+
+	// newNode.CryptoKey = data
 	newNode.Id = n.getNodeId()
 
 	// Get the neighbors for the new node and update the neighbors of the existing neighbors
@@ -213,6 +220,7 @@ func (n *NodeService) NewNode(data io.ReadCloser) (*utils.FederatorConfig, error
 	federatorConfig.CoreAnnInterval, _ = time.ParseDuration(os.Getenv("CORE_ANN_INTERVAL"))
 	federatorConfig.BeaconInterval, _ = time.ParseDuration(os.Getenv("BEACON_INTERVAL"))
 	federatorConfig.Redundancy, _ = strconv.Atoi(os.Getenv("FED_REDUNDANCY"))
+	fmt.Println("NewNode with FederatorConfig: ", federatorConfig)
 
 	return &federatorConfig, nil
 }

@@ -84,7 +84,7 @@ type BMResults struct {
 // [broker]: The URL of the MQTT broker.
 // [topic]: The topic to subscribe and publish messages to.
 // [qos]: The quality of service level for both subscribe and publish operations.
-// [size]: The size of the messages to publish.
+// [size]: The amount of the messages to publish.
 // [count]: The number of messages to publish.
 // [clients]: The number of client instances to create for subscribe and publish operations.
 // [quiet]: A boolean flag indicating whether to suppress log output.
@@ -207,16 +207,18 @@ SUBJOBDONE:
 	// collect the sub results
 	subtotals := calculateSubscribeResults(subresults, pubresults)
 
-	if !quiet {
-		log.Printf("All jobs done.\n")
-	}
-
-	return &BMResults{
+	results := &BMResults{
 		PubRuns:   pubresults,
 		SubRuns:   subresults,
 		PubTotals: pubtotals,
 		SubTotals: subtotals,
-	}, nil
+	}
+
+	if !quiet {
+		log.Printf("All jobs done.%v\n", results)
+	}
+
+	return results, nil
 }
 
 // calculatePublishResults calculates the total publish results based on the given pubresults and totalTime.

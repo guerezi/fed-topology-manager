@@ -3,8 +3,9 @@ package utils
 import "time"
 
 type NeighborConfig struct {
-	Id int64
-	Ip string
+	Id        int64  `json:"id"`
+	Ip        string `json:"ip"`
+	PublicKey string `json:"publickey"`
 }
 
 type FederatorConfig struct {
