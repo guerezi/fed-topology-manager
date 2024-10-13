@@ -3,9 +3,8 @@ package utils
 import "time"
 
 type NeighborConfig struct {
-	Id        int64  `json:"id"`
-	Ip        string `json:"ip"`
-	PublicKey string `json:"publickey"`
+	Id int64  `json:"id"`
+	Ip string `json:"ip"`
 }
 
 type FederatorConfig struct {
@@ -15,4 +14,6 @@ type FederatorConfig struct {
 	Redundancy      int              `json:"redundancy"`
 	CoreAnnInterval time.Duration    `json:"coreAnnInterval"`
 	BeaconInterval  time.Duration    `json:"beaconInterval"`
+	PublicKey       []byte           `json:"publicKey"`
+	SharedKey       []byte           `json:"sharedKey"` // TODO: Remove this field
 }

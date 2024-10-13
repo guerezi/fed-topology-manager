@@ -8,7 +8,9 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 	"time"
+	keys "topology/application/crypto"
 	"topology/application/database"
 	"topology/application/database/models"
 	"topology/application/utils"
@@ -131,7 +133,7 @@ func (n *NodeService) updateNeighbors(neighbors []models.Node, newNode *models.N
 	fmt.Println("Updating neighbors for node ", newNode.Id)
 	for _, neighbor := range neighbors {
 		//update new node neighbors
-		newNode.Neighbors = append(newNode.Neighbors, utils.NeighborConfig{Id: neighbor.Id, Ip: neighbor.Ip, PublicKey: neighbor.PublicKey})
+		newNode.Neighbors = append(newNode.Neighbors, utils.NeighborConfig{Id: neighbor.Id, Ip: neighbor.Ip})
 		newNode.NeighborsAmount += 1
 
 		//adds the new node to neighbor already belonging to the topology
@@ -154,14 +156,15 @@ func (n *NodeService) updateNeighbors(neighbors []models.Node, newNode *models.N
 		// If the connection to the neighbor was successful, send the topology announcement
 		if err == nil {
 			fmt.Println("Sending topology announcement from ", newNode.Id, "to neighbor NEW CALL", neighbor.Id)
-			//TODO: HERE
 			payload, _ := json.Marshal(utils.TopologyAnn{
-				Action:    "NEW",
-				Neighbor:  utils.NeighborConfig{Id: newNode.Id, Ip: newNode.Ip},
-				PublicKey: newNode.PublicKey,
+				Action:   "NEW",
+				Neighbor: utils.NeighborConfig{Id: newNode.Id, Ip: newNode.Ip},
 			})
 
-			_, _ = mqttClient.Publish("federator/topology_ann", payload, 2, false)
+			fmt.Println("Encripting whit shared key", string(neighbor.SharedKey))
+			encrypted, _ := keys.Encrypt(payload, neighbor.SharedKey)
+
+			_, _ = mqttClient.Publish("federator/topology_ann", encrypted, 2, false)
 
 			mqttClient.Disconnect()
 		} else {
@@ -188,12 +191,32 @@ func (n *NodeService) NewNode(data io.ReadCloser) (*utils.FederatorConfig, error
 		return nil, err
 	}
 
+	whitelist := strings.Split(os.Getenv("WHITELISTED_NODES"), ",")
+
+	found := func(slice []string, value string) bool {
+		for _, v := range slice {
+			if v == value {
+				return true
+			}
+		}
+		return false
+	}(whitelist, newNode.HardwareId)
+
+	if !found {
+		return nil, fmt.Errorf("node not whitelisted")
+	}
+
 	// Get the latency of the new node by sending a benchmark message to the broker
 	newNode.Latency, _ = n.getNodeLatency(newNode.Ip)
 	newNode.LatestHealthCheck = time.Now()
 
-	// newNode.CryptoKey = data
 	newNode.Id = n.getNodeId()
+
+	// TODO: theses keys would problably be stored in a secure place
+	privateKey, publicKey, _ := keys.GenerateECDHKeyPair()
+	otherKey, _ := keys.ConvertBytesToECDSAPublicKey(privateKey, newNode.PublicKey)
+
+	newNode.SharedKey, _ = keys.GenerateSharedSecret(privateKey, otherKey)
 
 	// Get the neighbors for the new node and update the neighbors of the existing neighbors
 	neighbors := n.getNeighborsForNode(newNode.Id)
@@ -220,6 +243,9 @@ func (n *NodeService) NewNode(data io.ReadCloser) (*utils.FederatorConfig, error
 	federatorConfig.CoreAnnInterval, _ = time.ParseDuration(os.Getenv("CORE_ANN_INTERVAL"))
 	federatorConfig.BeaconInterval, _ = time.ParseDuration(os.Getenv("BEACON_INTERVAL"))
 	federatorConfig.Redundancy, _ = strconv.Atoi(os.Getenv("FED_REDUNDANCY"))
+	federatorConfig.SharedKey = newNode.SharedKey // TODO: Should not send the shared key in the response!!
+	federatorConfig.PublicKey = keys.ConvertECDSAPublicKeyToBytes(publicKey)
+
 	fmt.Println("NewNode with FederatorConfig: ", federatorConfig)
 
 	return &federatorConfig, nil
@@ -319,13 +345,16 @@ func (n *NodeService) MonitorTopologyHealth() error {
 
 							if err == nil {
 								//send topology ann to neighbor informing the remove of offline node
-								fmt.Println("Sending topology announcement to neighbor REMOVE CALL", neighbor.Id)
+								fmt.Println("Sending topology announcement to neighbor REMOVE CALL", node.Ip)
 								payload, _ := json.Marshal(utils.TopologyAnn{
 									Action:   "REMOVE",
 									Neighbor: utils.NeighborConfig{Id: node.Id, Ip: node.Ip},
 								})
 
-								_, _ = mqttClient.Publish("federator/topology_ann", payload, 2, false)
+								fmt.Println("Encripting whit shared key", string(updatedNeighbor.SharedKey))
+								encrypted, _ := keys.Encrypt(payload, updatedNeighbor.SharedKey)
+
+								_, _ = mqttClient.Publish("federator/topology_ann", encrypted, 2, false)
 
 								// If the neighbor of offline node has no more neighbors, get new neighbors
 								if updatedNeighbor.NeighborsAmount <= 0 {
@@ -353,7 +382,10 @@ func (n *NodeService) MonitorTopologyHealth() error {
 												Neighbor: utils.NeighborConfig{Id: newNeighbor.Id, Ip: newNeighbor.Ip},
 											})
 
-											_, _ = mqttClient.Publish("federator/topology_ann", payload, 2, false)
+											fmt.Println("Encripting whit shared key", string(updatedNeighbor.SharedKey))
+											encrypted, _ := keys.Encrypt(payload, updatedNeighbor.SharedKey)
+
+											_, _ = mqttClient.Publish("federator/topology_ann", encrypted, 2, false)
 										}
 									}
 								} else {

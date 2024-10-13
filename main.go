@@ -2,11 +2,12 @@ package main
 
 import (
 	"fmt"
-	"github.com/gorilla/mux"
 	"log"
 	"net/http"
 	"topology/application/handlers"
 	"topology/application/services"
+
+	"github.com/gorilla/mux"
 )
 
 func main() {

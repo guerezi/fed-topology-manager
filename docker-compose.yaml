@@ -23,9 +23,10 @@ services:
     environment:
       - MONGO_URL=mongodb://root:root@mongodb:27017/admin
       - TOP_MAX_REDUNDANCY=5
-      - CORE_ANN_INTERVAL=10s
-      - BEACON_INTERVAL=10s
+      - CORE_ANN_INTERVAL=30s
+      - BEACON_INTERVAL=30s
       - FED_REDUNDANCY=2
+      - WHITELISTED_NODES=02:42:ac:13:00:03,02:42:ac:13:00:04,02:42:ac:13:00:05,02:42:ac:13:00:06
 
 networks:
   default:

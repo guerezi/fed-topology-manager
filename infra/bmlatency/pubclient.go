@@ -76,13 +76,11 @@ func (c *PubClient) run(res chan *PubResults) {
 // It takes an input channel for messages and a channel to signal when message generation is done.
 // The function generates the specified number of messages with the specified size and sends them to the input channel.
 // After generating all messages, it sends a signal that message generation is done and returns.
-// TODO: WHY GENERATE MESSAGES??
 func (c *PubClient) genMessages(ch chan *Message, done chan bool) {
 	for i := 0; i < c.MsgCount; i++ {
 		ch <- &Message{
 			Topic: c.PubTopic,
 			QoS:   c.PubQoS,
-			//Payload: make([]byte, c.MsgSize),
 		}
 	}
 	done <- true
