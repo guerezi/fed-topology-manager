@@ -37,6 +37,11 @@ func NewClient(broker string, clientID string) (*Client, error) {
 func (c Client) Consume(topics map[string]byte, messageHandler mqtt.MessageHandler) (bool, error) {
 	fmt.Println("Client ", c.ClientID, " subscribing to topics: ", topics)
 
+	if !c.client.IsConnectionOpen() || !c.client.IsConnected() {
+		connectTokem := c.client.Connect()
+		connectTokem.Wait()
+	}
+
 	token := c.client.SubscribeMultiple(topics, messageHandler)
 	token.Wait()
 

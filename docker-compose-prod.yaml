@@ -15,10 +15,11 @@ services:
       - ~/mongodb/data:/data/db
 
   topology-manager:
-    image: brunobevilaquaa/fed-topology-manager
+    image: guerezi/fed-topology-manager
     container_name: topology-manager
     ports:
       - "8080:8080"
+      - "1870:1883"
     environment:
       - MONGO_URL=${MONGO_URL}
       - TOP_MAX_REDUNDANCY=${TOP_MAX_REDUNDANCY}

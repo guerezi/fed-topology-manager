@@ -17,6 +17,7 @@ import (
 	mqttbmlatency "topology/infra/bmlatency"
 	paho "topology/infra/queue"
 
+	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/go-co-op/gocron"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -25,6 +26,8 @@ import (
 
 type NodeService struct {
 	Collection *mongo.Collection
+	Topics     *mongo.Collection
+	Client     *paho.Client
 }
 
 // NewNodeService creates a new NodeService instance.
@@ -39,9 +42,11 @@ func NewNodeService() *NodeService {
 	}
 
 	collection := db.GetCollection("nodes")
+	topics := db.GetCollection("topics")
 
 	return &NodeService{
 		Collection: collection,
+		Topics:     topics,
 	}
 }
 
@@ -169,6 +174,7 @@ func (n *NodeService) updateNeighbors(neighbors []models.Node, newNode *models.N
 			mqttClient.Disconnect()
 		} else {
 			fmt.Println("Error connecting to neighbor", neighbor.Ip)
+			fmt.Println(err)
 		}
 	}
 }
@@ -233,6 +239,15 @@ func (n *NodeService) NewNode(data io.ReadCloser) (*utils.FederatorConfig, error
 		return nil, err
 	}
 
+	client, err := paho.NewClient("tcp://localhost:1883", "topology"+strconv.FormatInt(newNode.Id, 10))
+
+	if err != nil {
+		return nil, err
+	}
+
+	fmt.Println("Created a Client for Node", newNode.Id)
+	n.Client = client
+
 	federatorConfig := utils.FederatorConfig{
 		Id:        newNode.Id,
 		Neighbors: newNode.Neighbors,
@@ -243,12 +258,272 @@ func (n *NodeService) NewNode(data io.ReadCloser) (*utils.FederatorConfig, error
 	federatorConfig.CoreAnnInterval, _ = time.ParseDuration(os.Getenv("CORE_ANN_INTERVAL"))
 	federatorConfig.BeaconInterval, _ = time.ParseDuration(os.Getenv("BEACON_INTERVAL"))
 	federatorConfig.Redundancy, _ = strconv.Atoi(os.Getenv("FED_REDUNDANCY"))
-	federatorConfig.SharedKey = newNode.SharedKey // TODO: Should not send the shared key in the response!!
 	federatorConfig.PublicKey = keys.ConvertECDSAPublicKeyToBytes(publicKey)
+
+	n.ListenToNodeAnn(newNode)
 
 	fmt.Println("NewNode with FederatorConfig: ", federatorConfig)
 
 	return &federatorConfig, nil
+}
+
+func (n *NodeService) ListenToNodeAnn(node models.Node) {
+
+	topics := map[string]byte{
+		"federated/node_ann/" + strconv.FormatInt(node.Id, 10): 2,
+	}
+
+	// TODO: remover do banco de topicos o node quando ele não responder o latency também, não esquecer, atualizar senhas
+	// TODO: Lembrar de atualizar a senha quando o core for mudado no meio tempo de coreAnn
+
+	messageHandler := func(client mqtt.Client, msg mqtt.Message) {
+		payload, _ := keys.Decrypt(msg.Payload(), node.SharedKey)
+
+		nodeAnn := utils.NodeAnn{}
+		_ = json.Unmarshal(payload, &nodeAnn)
+
+		if nodeAnn.Id != -1 {
+			switch nodeAnn.Action {
+			case "JOIN":
+				err := n.AdmitNodeInTopic(nodeAnn)
+				if err != nil {
+					fmt.Println("Error admitting node", nodeAnn.Id, "in topic", nodeAnn.Topic)
+					fmt.Println(err)
+				}
+			case "LEAVE":
+				err := n.RemoveNodeInTopic(nodeAnn)
+				if err != nil {
+					fmt.Println("Error removing node", nodeAnn.Id, "from topic", nodeAnn.Topic)
+					fmt.Println(err)
+				}
+			case "UPDATE_CORE":
+				err := n.UpdateTopicCore(nodeAnn)
+				if err != nil {
+					fmt.Println("Error updating core for topic", nodeAnn.Topic)
+					fmt.Println(err)
+				}
+			}
+		}
+	}
+
+	_, err := n.Client.Consume(topics, messageHandler)
+
+	if err != nil {
+		fmt.Println("Error consuming messages for node", node.Id)
+		fmt.Println(err)
+	}
+}
+
+// AdmitNodeInTopic admits a node in a topic, updating the topic and sending the new password to the nodes.
+// It retrieves the node from the collection and the topic from the topics collection.
+// If the topic does not exist, it creates a new topic with the node as the core.
+// It updates the topic with the new node and sends the new password to the nodes in the topic.
+func (n *NodeService) AdmitNodeInTopic(msg utils.NodeAnn) error {
+	node := models.Node{}
+	err := n.Collection.FindOne(context.Background(), bson.D{{Key: "id", Value: bson.D{{Key: "$eq", Value: msg.Id}}}}).Decode(&node)
+
+	if err != nil {
+		return err
+	}
+
+	topic := models.Topic{}
+	err = n.Topics.FindOne(context.Background(), bson.D{{Key: "topic", Value: bson.D{{Key: "$eq", Value: msg.Topic}}}}).Decode(&topic)
+
+	// Isso não deve acontecer
+	if err != nil {
+		topic = models.Topic{
+			Topic:    msg.Topic,
+			Password: nil,
+			Nodes:    []models.Node{node},
+			Core:     node,
+		}
+
+		_, err := n.Topics.InsertOne(context.Background(), topic)
+
+		if err != nil {
+			return err
+		}
+	} else {
+		n.Topics.FindOneAndUpdate(context.Background(), bson.D{{Key: "topic", Value: bson.D{{Key: "$eq", Value: msg.Topic}}}}, bson.M{
+			"$push": bson.M{
+				"nodes": node,
+			},
+		}).Decode(&topic)
+	}
+
+	// Se já tiver um topico, e ele já tem uma senha associada, posso enviar a senha de volta, se não, não envio
+	if topic.Password != nil {
+		decryptedPassword, _ := keys.Decrypt(topic.Password, topic.Core.SharedKey)
+		payload, _ := json.Marshal(utils.NodeAnn{
+			Id:       -1,
+			Topic:    msg.Topic,
+			Action:   "UPDATE_PASSWORD",
+			Password: decryptedPassword,
+		})
+
+		encrypted, _ := keys.Encrypt(payload, node.SharedKey)
+		topic := fmt.Sprintf("federated/node_ann/%d", node.Id)
+
+		fmt.Println("NODES:", node)
+
+		client, clientErr := paho.NewClient(node.Ip, "NodeService")
+
+		if clientErr != nil {
+			return clientErr
+		}
+
+		_, clientErr = client.Publish(topic, encrypted, 2, false)
+
+		if clientErr != nil {
+			return clientErr
+		}
+
+		client.Disconnect()
+	}
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// Removes a node from a topic, updating the topic and sending the new password to the nodes
+func (n *NodeService) RemoveNodeInTopic(msg utils.NodeAnn) error {
+	node := models.Node{}
+	err := n.Collection.FindOne(context.Background(), bson.D{{Key: "id", Value: bson.D{{Key: "$eq", Value: msg.Id}}}}).Decode(&node)
+
+	if err != nil {
+		return err
+	}
+
+	topic := models.Topic{}
+	err = n.Topics.FindOne(context.Background(), bson.D{{Key: "topic", Value: bson.D{{Key: "$eq", Value: msg.Topic}}}}).Decode(&topic)
+	if err != nil {
+		return err
+	}
+
+	n.Topics.FindOneAndUpdate(context.Background(), bson.D{{Key: "topic", Value: bson.D{{Key: "$eq", Value: msg.Topic}}}}, bson.M{
+		"$pull": bson.M{
+			"nodes": bson.M{"id": node.Id},
+		},
+	}).Decode(&topic)
+
+	password := keys.GenerateSessionKey(msg.Topic)
+	encryptedPassword, _ := keys.Encrypt(password, topic.Core.SharedKey)
+	// Devo criptografar com o que essa senha? Não sei quem é o core ainda (talvez)
+	// Acho que não tem problema porque se criptografar com qualquer merda, vou receber uma atualização de core e atualizar a senha
+	// Seguindo o caminho certo
+
+	n.Topics.FindOneAndUpdate(context.Background(), bson.D{{Key: "topic", Value: bson.D{{Key: "$eq", Value: msg.Topic}}}}, bson.M{
+		"$set": bson.M{
+			"password": encryptedPassword,
+		},
+	}).Decode(&topic)
+
+	decryptedPassword, _ := keys.Decrypt(topic.Password, topic.Core.SharedKey)
+	payload, _ := json.Marshal(utils.NodeAnn{
+		Id:       -1,
+		Topic:    msg.Topic,
+		Action:   "UPDATE_PASSWORD",
+		Password: decryptedPassword,
+	})
+
+	for _, topicNode := range topic.Nodes {
+		encrypted, _ := keys.Encrypt(payload, topicNode.SharedKey)
+		topic := fmt.Sprintf("federated/node_ann/%d", topicNode.Id)
+
+		client, clientErr := paho.NewClient(topicNode.Ip, "NodeService")
+
+		if clientErr != nil {
+			return clientErr
+		}
+
+		_, clientErr = client.Publish(topic, encrypted, 2, false)
+
+		if clientErr != nil {
+			return clientErr
+		}
+
+		client.Disconnect()
+	}
+
+	return nil
+}
+
+func (n *NodeService) UpdateTopicCore(msg utils.NodeAnn) error {
+	topicCore := models.Node{}
+	err := n.Collection.FindOne(context.Background(), bson.D{{Key: "id", Value: bson.D{{Key: "$eq", Value: msg.Id}}}}).Decode(&topicCore)
+
+	if err != nil {
+		return err
+	}
+
+	topic := models.Topic{}
+	err = n.Topics.FindOne(context.Background(), bson.D{{Key: "topic", Value: bson.D{{Key: "$eq", Value: msg.Topic}}}}).Decode(&topic)
+
+	password := keys.GenerateSessionKey(msg.Topic)
+	encryptedPassword, _ := keys.Encrypt(password, topicCore.SharedKey)
+
+	if err != nil {
+		fmt.Println("Topic not found, creating new topic", err, topic)
+
+		topic = models.Topic{
+			Topic:    msg.Topic,
+			Password: encryptedPassword,
+			Nodes:    []models.Node{topicCore},
+			Core:     topicCore,
+		}
+
+		_, err := n.Topics.InsertOne(context.Background(), topic)
+
+		if err != nil {
+			return err
+		}
+	} else {
+		n.Topics.FindOneAndUpdate(context.Background(), bson.D{{Key: "topic", Value: bson.D{{Key: "$eq", Value: msg.Topic}}}}, bson.M{
+			"$set": bson.M{
+				"password": encryptedPassword,
+				"core":     topicCore,
+			},
+			"$push": bson.M{
+				"nodes": topicCore,
+			},
+		}).Decode(&topic)
+	}
+
+	decryptedPassword, _ := keys.Decrypt(topic.Password, topic.Core.SharedKey)
+	payload, _ := json.Marshal(utils.NodeAnn{
+		Id:       -1,
+		Topic:    msg.Topic,
+		Action:   "UPDATE_PASSWORD",
+		Password: decryptedPassword,
+	})
+
+	for _, topicNode := range topic.Nodes {
+		encrypted, _ := keys.Encrypt(payload, topicNode.SharedKey)
+		topic := fmt.Sprintf("federated/node_ann/%d", topicNode.Id)
+
+		client, clientErr := paho.NewClient(topicNode.Ip, "NodeService")
+
+		if clientErr != nil {
+			return clientErr
+		}
+
+		_, clientErr = client.Publish(topic, encrypted, 2, false)
+
+		if clientErr != nil {
+			return clientErr
+		}
+
+		client.Disconnect()
+	}
+
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // MonitorTopologyHealth periodically checks the health of the topology nodes.
@@ -319,6 +594,31 @@ func (n *NodeService) MonitorTopologyHealth() error {
 
 						// Remove the offline node from the collection using its ObjectId
 						_, _ = n.Collection.DeleteOne(context.Background(), bson.D{{Key: "_id", Value: node.ObjectId}})
+
+						// Remove offline node from the topics
+						_, _ = n.Topics.UpdateMany(
+							context.Background(),
+							bson.D{{
+								Key: "nodes._id", Value: node.ObjectId,
+							}},
+							bson.M{
+								"$pull": bson.M{
+									"nodes": bson.M{"_id": node.ObjectId},
+								},
+								"$set": bson.M{
+									"password": nil,
+								},
+							},
+						)
+
+						// Remove offline nodes from the topics core
+						_, _ = n.Topics.UpdateMany(context.Background(), bson.D{{Key: "core.id", Value: bson.D{{Key: "$eq", Value: node.Id}}}}, bson.M{
+							"$set": bson.M{
+								"core": bson.M{},
+							},
+						})
+
+						// TODO: remover do banco de topicos o node quando ele não responder o latency também, não esquecer, atualizar senhas
 
 						// If the offline node has neighbors, update the neighbors of the offline node
 						for _, neighbor := range node.Neighbors {

@@ -22,7 +22,23 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+
+	"github.com/xdg-go/pbkdf2"
 )
+
+// GenerateSessionKey generates a session key from a seed using PBKDF2
+func GenerateSessionKey(seed string) []byte {
+	// A salt to use for the key derivation. This can be changed to a random value for each key generation.
+	salt := []byte("fixed_salt_value")
+
+	iterations := 10000
+	// Use PBKDF2 to generate the key based on the seed
+	key := pbkdf2.Key([]byte(seed), salt, iterations, 32, sha256.New)
+
+	fmt.Println("Generated key: ", key)
+
+	return key
+}
 
 // GenerateECDHKeyPair generates a private-public key pair using elliptic curves
 func GenerateECDHKeyPair() (*ecdsa.PrivateKey, *ecdsa.PublicKey, error) {
