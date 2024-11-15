@@ -29,3 +29,21 @@ type Node struct {
 	SharedKey         []byte                 `bson:"sharedKey" json:"sharedKey"`
 	HardwareId        string                 `bson:"hardwareId" json:"hardwareId"`
 }
+
+//  {
+// 	ObjectID: '5f8b3b3b1c9d440000f1b3b3',
+// 	Id: 1,
+// 	Ip: 'tcp://mqtt-fed-0:1883',
+// 	Neighbors: [
+// 		{
+// 			Id: 2,
+// 			Ip: 'tcp://mqtt-fed-1:1883'
+// 		},
+// 	],
+// 	NeighborsAmount: 1,
+// 	Latency: 0.0,
+// 	LatestHealthCheck: '2020-10-17T00:00:00Z',
+// 	PublicKey: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+// 	SharedKey: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+// 	HardwareId: '1234567890'
+//  }

@@ -218,7 +218,7 @@ func (n *NodeService) NewNode(data io.ReadCloser) (*utils.FederatorConfig, error
 
 	newNode.Id = n.getNodeId()
 
-	// TODO: theses keys would problably be stored in a secure place
+	// Generate the ECDH key pair for the new node and the shared key with the existing node
 	privateKey, publicKey, _ := keys.GenerateECDHKeyPair()
 	otherKey, _ := keys.ConvertBytesToECDSAPublicKey(privateKey, newNode.PublicKey)
 
@@ -272,9 +272,6 @@ func (n *NodeService) ListenToNodeAnn(node models.Node) {
 	topics := map[string]byte{
 		"federated/node_ann/" + strconv.FormatInt(node.Id, 10): 2,
 	}
-
-	// TODO: remover do banco de topicos o node quando ele não responder o latency também, não esquecer, atualizar senhas
-	// TODO: Lembrar de atualizar a senha quando o core for mudado no meio tempo de coreAnn
 
 	messageHandler := func(client mqtt.Client, msg mqtt.Message) {
 		payload, _ := keys.Decrypt(msg.Payload(), node.SharedKey)
@@ -617,8 +614,6 @@ func (n *NodeService) MonitorTopologyHealth() error {
 								"core": bson.M{},
 							},
 						})
-
-						// TODO: remover do banco de topicos o node quando ele não responder o latency também, não esquecer, atualizar senhas
 
 						// If the offline node has neighbors, update the neighbors of the offline node
 						for _, neighbor := range node.Neighbors {

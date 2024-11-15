@@ -1,14 +1,3 @@
-// TODO:  Diffie hellman mas com curva eliptica
-// Preciso de uns numeros no env pra todos terem uma whitelist
-// e validar se o calculo deu o numero certo mesmo
-
-// Chave de sessão ?? compartilhada no topico
-// SENHA COMPARTILHADA DENTRO DO TOPICO
-// QUE MUDA SE SAIR/ENTRAR GENTE
-
-// SENHA PARA O TOPICO
-// VER QUANDO SAI ENTÃO DO TOPICO
-
 package crypto
 
 import (
