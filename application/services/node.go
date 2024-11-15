@@ -363,7 +363,7 @@ func (n *NodeService) AdmitNodeInTopic(msg utils.NodeAnn) error {
 
 		fmt.Println("NODES:", node)
 
-		client, clientErr := paho.NewClient(node.Ip, "NodeService")
+		client, clientErr := paho.NewClient(node.Ip, "NodeService"+strconv.FormatInt(node.Id, 10))
 
 		if clientErr != nil {
 			return clientErr

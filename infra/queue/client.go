@@ -20,6 +20,7 @@ func NewClient(broker string, clientID string) (*Client, error) {
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(broker)
 	opts.SetClientID(clientID)
+	opts.ResumeSubs = true
 	client := mqtt.NewClient(opts)
 
 	if token := client.Connect(); token.Wait() && token.Error() != nil {
